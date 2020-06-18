@@ -1,0 +1,971 @@
+---
+title: 'STAT797: House Price'
+author: "Naby Diop"
+date: "11/19/2019"
+output:
+  pdf_document: default
+  fig_caption: yes        
+  includes:  
+    in_header: my_header.tex
+  html_document: default
+params:
+  interactive: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  out.width = "100%"
+)
+```
+
+```{r}
+library(faraway)
+library(lattice)
+library(caret)
+library(dummies)
+library(forcats)
+library(magrittr)
+library(dplyr)
+library(ranger)
+library(Boruta)
+library(randomForest)
+library(MASS)
+library(glmnet)
+library(tree)
+library(pls)
+library(ISLR)
+library(lmtest)
+library(ggplot2)
+library(ggpubr)
+library(car)
+library(sandwich)
+library(knitr)
+library(sjPlot)
+library(jtools)
+```
+
+## Introduction
+
+Many people believe that one of the best achievements in someone's life is to have their own house. Some people buy a house for living in, some others for business. However, house buyers have to go through a long and difficult process. The first and most important step of this process is to evaluate the finances. In fact, buying a house requires a lot of money. If one would like to buy a house, one should make sure that he/she have consistent income and a good amount of cash for a down payment. 
+However, even after determining the financial ability and knowing where and which house to buy, it is always a challenge to decide the worth of a house.
+The dataset House Price collect the information of 1460 houses in Ames, Iowa. This dataset has 81 variables that describe all the specificities of a house, including its price. 
+Thus, for this project we seek to predict the price of a house in Ames, Iowa given the 79 explanatory variables. The Id variable will be excluded because it does not affect the study.
+The main reasons for this study are to help the house sellers to fix a reasonable price; at same the time, to help the buyer check whether he/she is not overpaying. Therefore, the data will be fitted first with linear regression model followed by the random forests model.
+
+
+## Data Preparation
+
+```{r}
+House1 = read.csv("train.csv")
+House = House1[-1]
+attach(House)
+```
+
+```{r}
+str(House)
+```
+
+The dataset HousePrice was collected by Dean De Cock, a professor of statistics and Director of assessment at Iowa State University. It has 1460 observations, 79 explanatory variables and one response variable (SalePrice). We first examine the data by looking at its structure. The first thing that we notice is the data is a mix of numerical and categorical variables. However, when we look at the data [description](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data) given by the collectors, we realize that fourteen variables (Alley, BsmtQual, BsmtCond, BsmtExposure, BsmtFinType1, BsmtFinTye2, FirelaceQu, GarageType, GarageFinish, GarageQual, GarageCond, PoolQc, Fence and MIscFeature) in the dataset have $NA$ as output indicating the absence of a feature in a house. This doesn't mean the values are missing. Therefore, we must replace them with an actual value that can be interpreted differently by R. There are also six variables (MiscFeature, MssubClass, OverallQual, OverallCond, Utilities YrSold) that are interpreted numerical variables, but they are not. These variables need to be modified so they can be used correctly in the analysis. The code to do such transformations can be found on the appendix of this document.
+
+```{r}
+House$Alley = as.factor(ifelse(is.na(House$Alley), "NOA", House$Alley))
+House$BsmtQual = as.factor(ifelse(is.na(House$BsmtQual), "NOB", House$BsmtQual))
+
+House$BsmtCond = as.factor(ifelse(is.na(House$BsmtCond), "NOB", House$BsmtCond))
+
+House$BsmtExposure = as.factor(ifelse(is.na(House$BsmtExposure), "NOB", House$BsmtExposure))
+
+House$BsmtFinType1 = as.factor(ifelse(is.na(House$BsmtFinType1), "NOB", House$BsmtFinType1))
+House$BsmtFinType2 = as.factor(ifelse(is.na(House$BsmtFinType2), "NOB", House$BsmtFinType2))
+
+House$FireplaceQu = as.factor(ifelse(is.na(House$FireplaceQu), "NOF", House$FireplaceQu))
+
+House$GarageType = as.factor(ifelse(is.na(House$GarageType), "NOG", House$GarageType))
+
+House$GarageFinish = as.factor(ifelse(is.na(House$GarageFinish), "NOG", House$GarageFinish))
+
+House$GarageQual = as.factor(ifelse(is.na(House$GarageQual), "NOG", House$GarageQual))
+
+House$GarageCond = as.factor(ifelse(is.na(House$GarageCond), "NOG", House$GarageCond))
+
+House$PoolQC = as.factor(ifelse(is.na(House$PoolQC), "NOP", House$PoolQC))
+
+House$Fence = as.factor(ifelse(is.na(House$Fence), "NOF", House$Fence))
+
+House$MiscFeature = as.factor(ifelse(is.na(House$MiscFeature), "NONE", House$MiscFeature))
+House$MiscFeature = as.factor(House$MiscFeature)
+House$MSSubClass = as.factor(House$MSSubClass)
+House$OverallQual = as.factor(House$OverallQual)
+House$OverallCond = as.factor(House$OverallCond)
+House$Utilities = as.factor(House$Utilities)
+House$YrSold = as.factor(House$YrSold)
+```
+
+
+As in any data analysis, the first step is to look at some graphical and numerical displays of the data. A good numerical overview is the summary of the data. We use maxsum=10 to print the ten most frequent levels within a variable, because many of them have their number of levels less than 10. For those with more than 10 levels, the number of observations of the remaining levels will be automatically combined and stored in a new level called Other in R. 
+
+```{r}
+summary(House)
+```
+
+
+The frequency of some of the levels is so small that it makes it difficult to estimate their effect on the analysis. Thus, we will collapse many of them in the same level based on their similarity and frequency. The appendix of the document has the R code for such transformations.
+For example the variable Utilities have only 1 in NoSeWa, 1459 AllPub and 0 on any other else levels. This means Utilities is not important for the analyse, so we can drop it from the dataset. The variable LotShape has four levels. However, the levels IR1, IR2, IR3 are not too frequent and they all represent a type of irregularity. Therefore, we will collapse these three levels to one and call it IREG meaning irregular. The frequency of Bnk, HLS and Low for variable LanContour is little, plus they all represent a degree of flatness of the land. Thus, it makes sens to group them in only one category called NotFlat. We will use the same process as above to gather levels of categorical variable in the data whenever it is possible.
+
+
+```{r}
+House = House[-9]
+House$LotShape = fct_collapse(House$LotShape, REG = "Reg", IREG = c("IR1", "IR2", "IR3"))
+
+House$LandContour = fct_collapse(House$LandContour, Lvl = "Lvl", NotFlat = c("Bnk", "HLS", "Low"))
+
+House$MSZoning = fct_collapse(House$MSZoning, Rl = "RL", OTHERS= c("C (all)", "FV", "RH", "RM"))
+
+House$Alley = fct_collapse(House$Alley, NOA = "NOA", OTHERS= c("1", "2"))
+
+House$LotConfig = fct_collapse(House$LotConfig, Inside = "Inside", FR = c("FR2", "FR3"), Corner  = "Corner", CulDSas = "CulDSac")
+
+House$LandSlope = fct_collapse(House$LandSlope, Gtl = "Gtl", OTHERS= c("Mod", "Sev"))
+
+House$Condition1 = fct_collapse(House$Condition1, Norm = "Norm", AbNorm = c("Feedr", "Artery", "PosN", "PosA", "RRNn", "RRNe", "RRAe", "RRAn"))
+
+House$Condition2 = fct_collapse(House$Condition2, Norm = "Norm", AbNorm = c("Feedr", "Artery", "PosN", "PosA", "RRNn", "RRNe", "RRAe", "RRAn"))
+
+House$BldgType = fct_collapse(House$BldgType, "1Fam"="1Fam", OTHERS= c("2fmCon", "Duplex", "Twnhs", "TwnhsE"))
+
+House$HouseStyle = fct_collapse(House$HouseStyle, OneStory = "1Story", TwoStory = "2Story", Others = c("1.5Unf", "1.5Fin", "2.5Fin", "2.5Unf", "SFoyer", "SLvl"))
+
+House$OverallCond = fct_collapse(House$OverallCond, Exc = c("10", "9"), Good= c("8", "7"),  avg = c("6", "5"), notGood = c("4", "3", "2", "1"))
+
+House$OverallQual = fct_collapse(House$OverallQual, Exc = c("10", "9"), Good= c("8", "7"),  avg = c("6", "5"), notGood = c("4", "3", "2", "1"))
+
+House$RoofStyle = fct_collapse(House$RoofStyle, Gable = "Gable", Hit= "Hit",  Other = c("Gambrel", "Flat", "Shed", "Mansard"))
+
+House$RoofMatl = fct_collapse(House$RoofMatl, CompShg = "CompShg", Other = c("ClyTile", "Membran", "Metal", "Roll", "Tar&Gry", "WdShake", "WdShngl"))
+
+House$Exterior1st = fct_collapse(House$Exterior1st, VinylSd = "VinylSd", MetalSd= "MetalSd",  HdBoard = "HdBoard", WdSdng = "Wd Sdng", Plywood= "Plywood", CemntBd ="CemntBd", BrkFace="BrkFace", WdShing ="WdShing", Stucco = "Stucco", Other =c("AsbShng", "AsphShn", "BrkComm", "CBlock", "ImStucc", "Other", "PreCast", "Stone"))
+
+House$Exterior2nd = fct_collapse(House$Exterior2nd, VinylSd = "VinylSd", MetalSd= "MetalSd",  HdBoard = "HdBoard", WdSdng = "Wd Sdng", Plywood= "Plywood", CemntBd ="CemntBd", BrkFace="BrkFace", WdShing ="WdShing", Stucco = "Stucco", Other =c("AsbShng", "AsphShn", "BrkComm", "CBlock", "ImStucc", "Other", "PreCast", "Stone"))
+
+House$ExterQual = fct_collapse(House$ExterQual, Exc = c("Ex", "Gd"), Good= c("Fa", "TA"))
+
+House$ExterCond = fct_collapse(House$ExterCond, Exc = c("Ex", "Gd"), Good= c("Fa", "TA", "Po"))
+
+House$Foundation = fct_collapse(House$Foundation, CBlock="CBlock", PConc="PConc", Other= c("Slab", "Stone", "Wood", "BrkTil"))
+
+House$BsmtQual = fct_collapse(House$BsmtQual, "1" = "4", "2" = "3", OTHERS= c("1", "2", "NOB"))
+
+House$BsmtFinType2 = fct_collapse(House$BsmtFinType2, "1" = "6", OTHERS= c("1", "2", "3", "4", "5", "NOB"))
+
+House$BsmtCond = fct_collapse(House$BsmtCond, "1" = "4", OTHERS= c("1", "2", "3", "NOB"))
+
+House$Heating = fct_collapse(House$Heating, Gas = c("GasA", "GasW"), Other= c("Floor", "Grav", "OthW", "Wall"))
+
+House$HeatingQC = fct_collapse(House$HeatingQC, Exc = c("Ex", "Gd"), Good= c("Fa", "TA", "Po"))
+
+House$Electrical = fct_collapse(House$Electrical, SBrkr = "Sbrkr", Other= c("FuseA", "FuseF", "FuseP", "Mix"))
+
+House$Functional = fct_collapse(House$Functional, Typ = "Typ", Deduction= c("Maj1", "Maj2", "Min1", "Min2", "Mod", "Sev"))
+
+House$GarageType = fct_collapse(House$GarageType, "1" = "6", "2" ="2", Other= c("1", "3", "4", "5", "NOG"))
+
+House$BsmtFinType1 = fct_collapse(House$BsmtFinType1, "AccQuarters" = c("3", "1", "4"),  Other= c("NOB", "5", "2", "6"))
+
+House$GarageFinish = fct_collapse(House$GarageFinish, "1" = "1", "2" ="2", "3" =c("3", "NOG"))
+
+House$GarageQual = fct_collapse(House$GarageQual, "1" = "5", "2"= c("1", "2", "3", "4", "NOG"))
+
+House$GarageCond = fct_collapse(House$GarageCond, "1" = "5", "2"= c("1", "2", "3", "4", "NOG"))
+
+House$PoolQC = fct_collapse(House$PoolQC, "1" = "NOP", "2" = c("1", "2", "3"))
+
+House$Fence = fct_collapse(House$Fence, "1" = "NOP", "2" = c("1", "2", "3", "4"))
+
+House$MiscFeature = fct_collapse(House$MiscFeature, "1" = "NONE", "2"= c("1", "2", "3", "4"))
+
+House$SaleType = fct_collapse(House$SaleType, WD = "WD", New = "New", Other = c("CWD", "VWD", "COD", "Con", "ConLw", "ConLD", "Oth"))
+
+House$SaleCondition = fct_collapse(House$SaleCondition, Normal = "Normal", Abnorml = "Abnorml", Partial ="Partial", Other = c("AdjLand", "Family", "Alloca"))
+
+House$MoSold = cut(House$MoSold, breaks = c(1, 6, 12), labels = c("1stFyear", "2ndFyear"), right = FALSE)
+
+House$YearBuilt = cut(House$YearBuilt, breaks = c(1880, 1900, 1920, 1940, 1960, 1980, 2000, 2010), labels = c("1st20s", "2nd20s",  "3nd20s", "4th20s", "5th20s", "6th20s", "7th20s"), right = FALSE)
+
+House$YearRemodAdd = cut(House$YearRemodAdd, breaks = c(1950, 1970, 1990, 2010), labels = c( "1st20s", "2nd20s", "3rd20s"), right = FALSE)
+
+House$MSSubClass = fct_collapse(House$MSSubClass, OneStory = c("20", "30", "40"), OneHfStoty = c("45", "50"), TwoStory = c("60", "70"), TwoHfStory = "75",  Split = c("80", "85"), Duplex = "90", Pud = c("120", "150"), PudM = c("160", "180"), TwoFam = "190")
+
+
+House$GarageYrBlt = cut(House$GarageYrBlt, breaks = c(1900,  1920,  1940,  1960,  1980,  2000, 2010), labels = c("1st20s", "2nd20s",  "3rd20s", "4th20s", "5th20s",  "6ths"), right = FALSE)
+```
+
+After removing all the $NA$ that were meant to identify the absence of an existing feature, we must delete all the other $NA$ which represent missing values.
+The actual dimension of the data is 1074 overvations and 79 variables.
+
+```{r}
+House = na.omit(House)
+dim(House)
+```
+
+
+Now we have modified our dataset to a much more meaningful one, we can do some preliminary variable selection. It is important to select a subset of variables that best predict the response variable. For this purpose, we will be using the function Boruta from [Boruta package](https://cran.r-project.org/web/packages/Boruta/Boruta.pdf) in R. "Boruta is an all relevant feature selection wrapper algorithm, capable of working with any classification method that output variable importance measure (VIM)" (R description of Boruta). This package will help us to identify the variables that are best for predicting SalePrice.
+
+```{r}
+set.seed(100)
+H2 = Boruta(SalePrice ~ ., data = House, doTrace = 0, maxRuns = 200)
+```
+
+```{r}
+print(H2)
+```
+
+The preliminary variable selection indicates 45 variables that are meaningful for this analysis, 26 variables can be excluded, and only seven variables were left undecided by boruta algorithem. However, the function TentativeRoughFix from the same package (boruta) allow a method that decides which variables among these seven we must keep. 
+
+```{r}
+H3 = TentativeRoughFix(H2)
+H3
+```
+
+After appying this function we have 46 variables confirmed important; the rest will not be used anymore. We can use the function getNonRejecdFormula (from boruta package) to have a look at the variables that will be used for fitting the models.
+
+```{r}
+getNonRejectedFormula(H3)
+```
+
+## Data Analysis
+
+### Preliminary analysis
+
+The first step in any data analysis is to split the data into training and test set. Here, we will be using 70% of the data as train set and 30% as test set.
+
+```{r}
+set.seed(200)
+Train_index = sample(dim(House)[1], dim(House)*0.70)
+Train_set = House[Train_index, ]
+Test_set = House[-Train_index, ]
+```
+
+Considering first just the response variable, we can look at its distribution. Thus, we will look at the its histogram and its summary. 
+
+```{r}
+summary(Train_set$SalePrice)
+```
+
+We see that the SalePrice of a house ranges from 35311 to 755000. The mean price of a house in Aimes Iowa is 183764.
+
+```{r}
+par(mfrow=c(1,2))
+hist(Train_set$SalePrice, main = "SalePrise", xlab = "House Price")
+plot(density(Train_set$SalePrice), main="SalePrice")
+rug(Train_set$SalePrice)
+```
+
+From these two plots, the histogram and the kernel density of estimate which is a smooth version of the histogram, we see that SalePrice distribution is slightly right skewed. Such plot does not help much in detecting outliers in the data. However transforming the SalePrice with the log distribution makes it normally distributed. In another words the log of SalePrice is normal. This can be visualized by the bellow curve and histogram.
+
+```{r}
+Train_set2 = Train_set
+Train_set2$SalePrice = log(Train_set$SalePrice)
+```
+
+```{r}
+par(mfrow=c(1,2))
+hist(Train_set2$SalePrice, main = "Log SalePrise", xlab = "log(SalePrice)")
+plot(density(Train_set2$SalePrice), main="Log SalePrice")
+rug(Train_set2$SalePrice)
+```
+
+We will be using the log of SalePrice for fowarder analysis.
+
+## Linear Regresion
+
+Linear regression is a useful tool for predicting a quantitative response. Thus, we can describe House Price data with a linear model which takes the form:
+
+$$Y = \beta_0 + \beta_1X_{1} + \beta_2X_{2} + \cdots + \beta_{p-1}X_{p-1} + \epsilon, p=1,2,\cdots,45$$.
+
+Where Y = $\log(SalePrice)$ with n=1460 $y=\begin{pmatrix} y_1, \cdots, y_n \end{pmatrix}^T$, $\epsilon=\begin{pmatrix} \epsilon_1, \cdots, \epsilon_n \end{pmatrix}^T$, $\beta=\begin{pmatrix} \beta_0, \cdots, \beta_n \end{pmatrix}^T$and 
+
+$$X =
+\begin{pmatrix}
+1&x_{11}&x_{12}&\cdots&x_{1,46}\\
+1&x_{21}&x_{22}&\cdots&x_{2,46}\\
+\vdots&\vdots&\vdots&\vdots\\ 
+1&x_{n,1}&x_{n,2}&\cdots&x_{n,46}
+\end{pmatrix}
+$$
+
+__lm model fit__
+
+```{r}
+set.seed(300)
+lm_fit =  lm(Train_set2$SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + LotShape + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    YearBuilt + YearRemodAdd + Exterior1st + Exterior2nd + MasVnrType + 
+    MasVnrArea + ExterQual + Foundation + BsmtQual + BsmtExposure + 
+    BsmtFinType1 + BsmtFinSF1 + BsmtUnfSF + TotalBsmtSF + HeatingQC + 
+    CentralAir + X1stFlrSF + X2ndFlrSF + GrLivArea + BsmtFullBath + 
+    FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + 
+    TotRmsAbvGrd + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + GarageArea + PavedDrive + WoodDeckSF + 
+    OpenPorchSF, data = Train_set2)
+```
+
+```{r, render='normal_print'}
+summary(lm_fit)
+```
+
+The output of lm_fit is much too large to allow an objective interpretation on each variable. However, we notice that R-squared is 0.92, this mains that aproximatively 92% of the variation in SalePrice is explained by the model which is a good indicator. We also have the ajusted R-squared that is 0.90. The adjusted R-squared is a penalizer coefficient. In fact, when we add a new veriable to our model R-squared will allways increase whereas the ajusted will not when the added variable does not increase the accuracy of the model. 
+We can do model selection to reduce the number of predictors and build a much more simple and accurate model. The Akaike Information Criterion (AIC) will be used to perform this task. It can be performed using step() function in R. 
+
+```{r}
+Best_lm = step(lm_fit, trace = 0)
+```
+
+```{r, render='normal_print'}
+summary(Best_lm)
+```
+
+With the AIC criterion we are aible to drop many predictors and endup with 26 variables. Also we notice that the R-squared and Adjusted R-squared are roughly the same as the full model builded above. This essentialy means that the models have the same accuracy eventhough Best_lm has less varibles.
+The plot below is the Residuals vs Fitted. 
+
+```{r}
+plot(Best_lm, 1)
+```
+
+Generaly this plot is used to check the constance error variance and linearity assumptions of the model. We can see that the plot does show some tendency of lack of fit. The red line in the middle is slightly curved. The plot also indicates that the variance is not constant. In fact, the second half of the plot indicate a slitely bigger variance than the first half. In other words, the residuals increase as the fitted values increase. So, the inference here is, heteroscedasticity exists. We can test constant variance assumption using the bptest function in r. 
+
+```{r}
+bptest(Best_lm)
+```
+From the output, the p-value < 0.05 this imply that the variance of the residuals is not constant and infer that heteroscedasticity is indeed present, which confirm the  graphical inference we made above.
+One way to fix this lack of fit is to build the model with some other variables or do some variable transformation using functions such as log, sqrt, etc. Another way is to use Box-Cox transformation. Box-Cox is a mathematical transformation of the variable to make it approximate to a normal distribution. Often, doing a box-cox transformation of the response variable solves the issue. Here we will not be fixing this issue insted we will build some other models and compare one model to another in order to chose the best one.
+Now we can check whether the model satisfies the normality assumption by plotting the QQ_Normal plot.
+
+```{r}
+ggqqplot(Best_lm$residuals,main = "                                      Normal Q-Q", xlab = "Theoretical Quantiles" ,ylab = "Standardized residuals", color = "blue" )
+```
+
+The major portion of the observations follow a line with few exceptions. However, we can see at the beginning and at the end of the plot that some observation deviate from the line. This indicates a long-tailed error. This suggest that we should consider robust fitting.
+We can use Shapiro-Wilk test to test this normality assumption. 
+
+```{r}
+shapiro.test(Best_lm$residuals)
+```
+
+From the output, the p-value < 0.05 implying that the distribution of the data are significantly different from normal distribution. In other words, we can not assume the normality. However, for large dataset such as this one the normality assumption is not crusial, as the inference will be approximately correct in spite of the nonnormality. Here the deviation from normality is acceptable, therefore, we won't be changing the model because of nonnormality of the residuals.
+We can also check the presence or absence of outliers by plotting Residuals vs Leverage.
+
+```{r}
+plot(Best_lm, 5)
+```
+
+There are few observations that lie out of the contour lines for Cook statistics. These observations represent the outliers. We must study them closly so, we can identify there effect on the model. For more detail about the outliers we can plot the half-normal plot for the leverage.
+
+```{r}
+halfnorm(hatvalues(Best_lm))
+```
+
+This plot shows six points with much higher leverage than the rest. One way to deal with the outliers is to delete them fom the data, but this leads in generale to other ouliers. So we will use robust linear model to take care of these outliers. [Robust regression](https://www.rdocumentation.org/packages/MASS/versions/7.3-51.4/topics/rlm) is an alternative to the least square (linear model) approch that downweights the effect of larger errors. The function rlm from the MASS package is used to fit robust regression in R.
+
+```{r}
+set.seed(111)
+par(mfrow = c(1,2))
+rlm_fit = rlm(Train_set2$SalePrice ~ LotFrontage + LotArea + Neighborhood + 
+  BldgType + HouseStyle + OverallQual + OverallCond + Exterior2nd + 
+    BsmtQual + BsmtExposure +  BsmtFinSF1 + BsmtUnfSF + 
+   TotalBsmtSF + CentralAir + X1stFlrSF + GrLivArea + BsmtFullBath + 
+    FullBath + HalfBath + KitchenAbvGr + KitchenQual + TotRmsAbvGrd + 
+    Fireplaces + FireplaceQu + GarageCars + SaleCondition + BsmtFinType1,
+    data = Train_set2)
+plot(Best_lm, 5, main = "Leverage Plot for lm_fit")
+plot(rlm_fit, 5, main = "Leverage Plot for rlm_fit")
+```
+
+As shown from the plots robust linear method reduces the effect of the outliers on the model. But still the house id 1299 remains influential. The houses 31, 765 are also influential, but they are contained within the limits of cooks distance. We can take look at the position of these houses by plotting SalePrice against GrLivArea whith determine the geographical position of a house.
+
+```{r}
+plot(House$SalePrice ~ House$GrLivArea, col = "blue")
+points(5642	,160000, col="red")
+points(4676	,184750, col="red")
+```
+
+This plot shows two houses with a verry low price highled with red color, these houses doesn't fallow the natural progression of SalePrice. So we will go back to the data and delete them. There are two other points on the top of the plot that seems influential. However, we won't remove them because they fallow the natural progress of SalePrice.
+
+```{r}
+Train_set3 = Train_set2[-c(722,373), ]
+```
+
+After we remove the outliers from the original data, we can fit again linear model with 26 variables, selected by the Best_lm model and check our assumptions.
+
+```{r}
+New.lm_fit =  lm(formula = Train_set3$SalePrice ~ MSSubClass + LotFrontage + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    Exterior2nd + Foundation + BsmtExposure + BsmtFinType1 + 
+    BsmtFinSF1 + BsmtUnfSF + HeatingQC + CentralAir + X1stFlrSF + 
+    X2ndFlrSF + BsmtFullBath + FullBath + HalfBath + KitchenAbvGr + 
+    KitchenQual + TotRmsAbvGrd + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + OpenPorchSF, data = Train_set3)
+```
+```{r}
+plot(New.lm_fit, 1)
+```
+
+```{r}
+bptest(New.lm_fit)
+```
+
+As seen on the plot above, New.lm_fit is a better model than the sofar fitted models. We can assum that the error has constanstant variance with a $\alpha$ level of 0.01 with was not the case with previous models. New.lm_fit will than be used for the rest of the analysis.
+
+### Test Error for the sofor fitted models
+
+Here we will calculate the errors on the test set. The total error of a model is composed of three different terms: *bias*, *variance* and the *the irreducible error*. 
+One task of a statistician is to minimize the bias and the variance, the goal is to reduce this two terms to zero. The irreducible error, is the noise term in the true relationship (the fitted model vs a model that exactly predict SalePrice) and it cannot be reduced by any model. The term $bais^2 + variance + irr\_error$ is call the mean squared error (MSE).
+
+*Robust regression test MSE, Bias Square and Variance*
+
+**MSE**
+
+```{r}
+set.seed(500)
+Test_set1 = Test_set[-120, ]
+Test_set1$SalePrice = log(Test_set1$SalePrice)
+p = predict(rlm_fit, Test_set1)
+error.rlm = mean((Test_set1$SalePrice - p)^2) 
+error.rlm
+```
+
+**Variance**
+
+The variance is define as the variability of a model prediction for a given data point.
+
+```{r}
+rlm.var = mean((p - mean(p))^2)
+rlm.var
+```
+
+**Bias**
+
+The bias is define as the mean of difference between the expected prediction of our model and the correct value which we are trying to predict.
+
+```{r}
+rlm.bias = mean(mean(p)- Test_set1$SalePrice)
+rlm.bias
+```
+
+*Linear regression test error, bias square and variance (New.lm_fit)*
+
+**MSE**
+
+```{r}
+set.seed(500)
+p2 = predict(New.lm_fit, Test_set1)
+error.lm = mean((Test_set1$SalePrice - p2)^2) 
+error.lm
+```
+
+**Variance**
+
+```{r}
+lm.var = mean((p2 - mean(p2))^2)
+lm.var
+```
+
+**Bias**
+
+```{r}
+lm.bias = mean(mean(p2)- Test_set1$SalePrice)
+abs(lm.bias)
+```
+
+__New.lm_fit__ performs better on the test set than the rlm_fit, therefore, we be using __New.lm_fit__ for forwarder analysis. In fact the lover the MSE the better the model. This means that the lower the bias and the variance the better the model. In this case the linear model produices smaller MSE, variance and bias.
+
+## Random Forest
+
+[Random Forest](https://www.rdocumentation.org/packages/randomForest/versions/4.6-14/topics/randomForest) model is developed by aggregeting trees. In insted of building one tree, we create a lot of decision trees and aggregate all the results. We can use *Random Forest* for *classification* and *regression*. In this case it will be use for regresion because salePrice is a numerical variable. *Random Forest Model* gives a lot of advantages. Among them there is the possibility that it provides for variable selection based on their importance.
+
+### Fitting random forest model
+
+We use the function randomForest from randomForest packege. As stated above random forest first aggregate a results given by many decision trees, the default value for the number of trees is 500. Than it select randomly a sample from the data. Each sample use a fix number of variables. For classification model it uses the square root of the number of feattures, and for regresion it uses the third of the number of variables.
+Here, we will be fitting random forest model on the 46 variables obtained from the preliminary variable selection using Boruta function and we will be using the data in which we have already remove the two outliers discribes above.
+
+```{r}
+set.seed(400)
+rf_fit  = randomForest(SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + LotShape + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    YearBuilt + YearRemodAdd + Exterior1st + Exterior2nd + MasVnrType + 
+    MasVnrArea + ExterQual + Foundation + BsmtQual + BsmtExposure + 
+    BsmtFinType1 + BsmtFinSF1 + BsmtUnfSF + TotalBsmtSF + HeatingQC + 
+    CentralAir + X1stFlrSF + X2ndFlrSF + GrLivArea + BsmtFullBath + 
+    FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + 
+    TotRmsAbvGrd + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + GarageArea + PavedDrive + WoodDeckSF + 
+    OpenPorchSF, importance=TRUE, Train_set2)
+rf_fit
+```
+
+We can see that the model is 87.57% accurate. Whith is not far from the what we have since in the previous model (about 90%)
+
+#### Variable importance
+
+```{r}
+kable(importance(rf_fit))
+```
+
+The %InMSE indicate the mean decrease in accuracy of the model when we remove a variable, and the IncNodePurity indicate the total mean decrease in node impurity that result from splitting over variables. In another words, these two parameters measure how important is a given variable. For example if the variable Neighborhood is drop from the model the MSE (Mean Square Error) will increase by 21% and the node impurity will also drasticly increase. This mean that Neiborhood is very important for the analysis. We can also notice the verry low %InMSE of the variable PavedDrive which means that the variable is not important for the model. Removing it will also result in an unsignificant increase of the node impurity. The following plot is the graphical display of variables' importance.
+
+```{r}
+varImpPlot (rf_fit, sort = TRUE, cex=0.6)
+```
+
+This plot shows that the variables Neiborhood, OverallQual, GrLivArea and GarageCars are the top four importante variable for predincting SalePrice. Whereas, the varibles Fireplaces, BedroomAbvGr, YearRemodAdd and WoodDeckSF are the least four important variables.
+
+#### Test errors 
+
+*MSE*
+
+```{r}
+pp =predict(rf_fit, Test_set1)
+error.rf = mean((Test_set1$SalePrice - pp)^2) 
+error.rf
+```
+
+**Viance**
+
+```{r}
+rf.var = mean((pp - mean(pp))^2)
+rf.var
+```
+
+**Bias**
+
+```{r}
+rf.bias = mean(mean(pp)- Test_set1$SalePrice)
+abs(rf.bias)
+
+```
+
+The test error is smaller than the MSE of train set, which is a good indicator of the accuracy of the model.
+
+## Conclusion
+
+Durring the process of this analysis we have fitted three different models for predicting SalePrice. Here, are looking for a comparative way that allow to choose the best possible model. As we stated in the body of this paper, to have an insight of the best model we must look at their MSE, Bias and Variance. The model with the lower test errors will be the best model. The table bellow print test errors of the three different models.
+
+```{r}
+table = matrix(NA, nrow = 3, ncol = 3)
+rownames(table) = c("rlm", "lm", "rf")
+colnames(table) = c("MSE", "BIAS", "VARIANCE")
+table[3,]= c(error.rlm, rlm.bias, rlm.var)
+
+table[2, ]= c(error.lm, lm.bias, lm.var)
+
+table[1,]= c(error.rf, rf.bias, rf.var)
+kable(table, caption = "Errors Tatble")
+```
+
+A visual over look the table (MSE, BIAS, VARIANCE) is given.
+
+```{r}
+error.all = c(error.rlm, error.lm, error.rf)
+bias.all = c(rlm.bias, lm.bias, rf.bias)
+var.all = c(rlm.var, lm.var, rf.var)
+names(error.all) = c("RF", "LM", "RLM") 
+names(bias.all) = c("RF", "LM", "RLM") 
+names(var.all) = c("RF", "LM", "RLM") 
+par(mfrow=c(1,3))
+barplot(error.all, col="green" ,xlab="Error Names", ylab="Error Measurements", beside = T)
+barplot(bias.all, col="yellow" ,xlab="Bias Names", ylab="Error Measurements", beside = T)
+barplot(bias.all, col="red" ,xlab="Variance Names", ylab="Error Measurements", beside = T)
+```
+
+A comparative analysis of the *linear regression* (lm) model and *random forest* (rf) model show that linear model is a better fit for this data. We can look at the 10 first predicted values by the linear model and compare them to the first 10 actual values of SalePrice.
+
+```{r}
+Train_set11 = Train_set
+Train_set11$SalePrice = log(Train_set11$SalePrice)
+prd = predict(New.lm_fit, Train_set11)
+```
+
+
+```{r}
+table = matrix(NA, nrow = 10, ncol = 3)
+colnames(table) = c("log(SalePrice)", "PredictedValue", "Difference")
+table[,1]= c(Train_set11$SalePrice[1], Train_set11$SalePrice[2], Train_set11$SalePrice[3], Train_set11$SalePrice[4], Train_set11$SalePrice[5],Train_set11$SalePrice[6], Train_set11$SalePrice[7], Train_set11$SalePrice[10], Train_set11$SalePrice[9], Train_set11$SalePrice[8])
+
+table[, 2]= c(prd[1], prd[2],prd[3], prd[4], prd[5], prd[6], prd[7], prd[8], prd[9], prd[10])
+
+table[,3]= c(
+round(abs(Train_set11$SalePrice[1]-prd[1]),3), round(abs(Train_set11$SalePrice[2]-prd[2]),3), round(abs(Train_set11$SalePrice[3]-prd[3]),3), round(abs(Train_set11$SalePrice[4]-prd[4]),3), round(abs(Train_set11$SalePrice[5]-prd[5]),3), round(abs(Train_set11$SalePrice[6]-prd[6]),3), round(abs(Train_set11$SalePrice[7]-prd[7]),3), round(abs(Train_set11$SalePrice[8]-prd[8]),3), round(abs(Train_set11$SalePrice[9]-prd[9]),3), round(abs(Train_set11$SalePrice[10]-prd[10]),3))
+kable(table, caption = "Comparative Table")
+```
+
+We can see that the difference between the predicted and the actual values is very small for most of the entries. In fact the highest difference in absolute value is 0.069 which is less than 1% of the actual value that coorespond to it.
+
+## Reference
+
+[Robert Gentleman, Kurt Hornik, and Giovanni Parmigiani, *An Introduction to Applied Multivariate Analysis with R*, Springer, 2011.](https://link.springer.com/content/pdf/10.1007%2F978-1-4419-9650-3.pdf)
+
+Gareth James, Daniela Witten, and Trevor Hastie *An Introduction to Statistical Learning*, Springer+Business Media, 2013.
+
+Jay L. Devore, and Kenneth N. Berk, *Modern Mathematical Statistics With Applications*, Springer, Second Edition, 2012.
+
+Julian J. Faraway *Extending the Linear Model with R*: Generalized Linear, Mixed Effect and Nonparametric Regression Models, CRC Press, Second edition, 2016.
+
+[Kutner, Nachtsheim, Neter and Li, *Applied Linear Statistical Models*, McGraw-Hill!Irwin, 5th edition, 2015.](https://d1b10bmlvqabco.cloudfront.net/attach/is282rqc4001vv/is6ccr3fl0e37q/iwfnjvgvl53z/Michael_H_Kutner_Christopher_J._Nachtsheim_JohnBookFi.org.pdf)
+
+
+
+## Appendix
+
+*R packages*
+```{r Libraries, echo=TRUE, eval=FALSE}
+library(faraway)
+library(lattice)
+library(caret)
+library(dummies)
+library(forcats)
+library(magrittr)
+library(dplyr)
+library(ranger)
+library(Boruta)
+library(randomForest)
+library(MASS)
+library(glmnet)
+library(tree)
+library(pls)
+library(ISLR)
+library(lmtest)
+library(ggplot2)
+library(ggpubr)
+library(car)
+library(sandwich)
+library(knitr)
+library(sjPlot)
+library(jtools)
+```
+*Loading the Data*
+
+```{r , echo=TRUE, eval=FALSE}
+House1 = read.csv("train.csv")
+House = House1[-1]
+attach(House)
+```
+*Structure and summary of the Data*
+
+```{r , echo=T, eval=FALSE}
+str(House)
+summary(House)
+```
+*Data transformation*
+
+```{r, echo=TRUE, eval=FALSE}
+House$Alley = as.factor(ifelse(is.na(House$Alley), "NOA", House$Alley))
+House$BsmtQual = as.factor(ifelse(is.na(House$BsmtQual), "NOB", House$BsmtQual))
+
+House$BsmtCond = as.factor(ifelse(is.na(House$BsmtCond), "NOB", House$BsmtCond))
+
+House$BsmtExposure = as.factor(ifelse(is.na(House$BsmtExposure), "NOB", House$BsmtExposure))
+
+House$BsmtFinType1 = as.factor(ifelse(is.na(House$BsmtFinType1), "NOB", House$BsmtFinType1))
+House$BsmtFinType2 = as.factor(ifelse(is.na(House$BsmtFinType2), "NOB", House$BsmtFinType2))
+
+House$FireplaceQu = as.factor(ifelse(is.na(House$FireplaceQu), "NOF", House$FireplaceQu))
+
+House$GarageType = as.factor(ifelse(is.na(House$GarageType), "NOG", House$GarageType))
+
+House$GarageFinish = as.factor(ifelse(is.na(House$GarageFinish), "NOG", House$GarageFinish))
+
+House$GarageQual = as.factor(ifelse(is.na(House$GarageQual), "NOG", House$GarageQual))
+
+House$GarageCond = as.factor(ifelse(is.na(House$GarageCond), "NOG", House$GarageCond))
+
+House$PoolQC = as.factor(ifelse(is.na(House$PoolQC), "NOP", House$PoolQC))
+
+House$Fence = as.factor(ifelse(is.na(House$Fence), "NOF", House$Fence))
+
+House$MiscFeature = as.factor(ifelse(is.na(House$MiscFeature), "NONE", House$MiscFeature))
+House$MiscFeature = as.factor(House$MiscFeature)
+House$MSSubClass = as.factor(House$MSSubClass)
+House$OverallQual = as.factor(House$OverallQual)
+House$OverallCond = as.factor(House$OverallCond)
+House$Utilities = as.factor(House$Utilities)
+House$YrSold = as.factor(House$YrSold)
+```
+
+```{r Data transformation 2, echo=T, eval=FALSE}
+House = House[-9]
+House$LotShape = fct_collapse(House$LotShape, REG = "Reg", IREG = 
+c("IR1", "IR2", "IR3"))
+
+House$LandContour = fct_collapse(House$LandContour, Lvl = "Lvl", NotFlat = 
+c("Bnk", "HLS", "Low"))
+
+House$MSZoning = fct_collapse(House$MSZoning, Rl = "RL", 
+OTHERS= c("C (all)", "FV", "RH", "RM"))
+
+House$Alley = fct_collapse(House$Alley, NOA = "NOA",
+OTHERS= c("1", "2"))
+
+House$LotConfig = fct_collapse(House$LotConfig, Inside = "Inside", 
+FR = c("FR2", "FR3"), Corner  = "Corner", CulDSas = "CulDSac")
+
+House$LandSlope = fct_collapse(House$LandSlope, Gtl = "Gtl", 
+OTHERS= c("Mod", "Sev"))
+
+House$Condition1 = fct_collapse(House$Condition1, Norm = "Norm", 
+AbNorm = c("Feedr", "Artery", "PosN", "PosA", "RRNn", "RRNe", "RRAe", "RRAn"))
+
+House$Condition2 = fct_collapse(House$Condition2, Norm = "Norm", 
+AbNorm = c("Feedr", "Artery", "PosN", "PosA", "RRNn", "RRNe", "RRAe", "RRAn"))
+
+House$BldgType = fct_collapse(House$BldgType, "1Fam"="1Fam",
+OTHERS= c("2fmCon", "Duplex", "Twnhs", "TwnhsE"))
+
+House$HouseStyle = fct_collapse(House$HouseStyle, OneStory = "1Story", TwoStory 
+= "2Story", Others = c("1.5Unf", "1.5Fin", "2.5Fin", "2.5Unf", "SFoyer", "SLvl"))
+
+House$OverallCond = fct_collapse(House$OverallCond, Exc = c("10", "9"), Good
+= c("8", "7"),  avg = c("6", "5"), notGood = c("4", "3", "2", "1"))
+
+House$OverallQual = fct_collapse(House$OverallQual, Exc = c("10", "9"), 
+Good= c("8", "7"),  avg = c("6", "5"), notGood = c("4", "3", "2", "1"))
+
+House$RoofStyle = fct_collapse(House$RoofStyle, Gable = "Gable", Hit= "Hit", 
+Other = c("Gambrel", "Flat", "Shed", "Mansard"))
+
+House$RoofMatl = fct_collapse(House$RoofMatl, CompShg = "CompShg", Other =
+c("ClyTile", "Membran", "Metal", "Roll", "Tar&Gry", "WdShake", "WdShngl"))
+
+House$Exterior1st = fct_collapse(House$Exterior1st, VinylSd = "VinylSd",
+MetalSd= "MetalSd",  HdBoard = "HdBoard", WdSdng = "Wd Sdng", Plywood= 
+"Plywood", CemntBd ="CemntBd", BrkFace="BrkFace", WdShing ="WdShing", 
+Stucco = "Stucco", Other =c("AsbShng", "AsphShn", "BrkComm", "CBlock",
+"ImStucc", "Other", "PreCast", "Stone"))
+
+House$Exterior2nd = fct_collapse(House$Exterior2nd, VinylSd = "VinylSd", 
+MetalSd= "MetalSd",  HdBoard = "HdBoard", WdSdng = "Wd Sdng", Plywood= 
+"Plywood", CemntBd ="CemntBd", BrkFace="BrkFace", WdShing ="WdShing", 
+Stucco = "Stucco", Other =c("AsbShng", "AsphShn", "BrkComm", "CBlock", 
+"ImStucc", "Other", "PreCast", "Stone"))
+
+House$ExterQual = fct_collapse(House$ExterQual, Exc = c("Ex", "Gd"), Good= 
+c("Fa", "TA"))
+
+House$ExterCond = fct_collapse(House$ExterCond, Exc = c("Ex", "Gd"), Good= 
+c("Fa", "TA", "Po"))
+
+House$Foundation = fct_collapse(House$Foundation, CBlock="CBlock", 
+PConc="PConc", Other= c("Slab", "Stone", "Wood", "BrkTil"))
+
+House$BsmtQual = fct_collapse(House$BsmtQual, "1" = "4", "2" = "3", 
+OTHERS= c("1", "2", "NOB"))
+
+House$BsmtFinType2 = fct_collapse(House$BsmtFinType2, "1" = "6", 
+OTHERS= c("1", "2", "3", "4", "5", "NOB"))
+
+House$BsmtCond = fct_collapse(House$BsmtCond, "1" = "4", 
+OTHERS= c("1", "2", "3", "NOB"))
+
+House$Heating = fct_collapse(House$Heating, Gas = c("GasA", "GasW"), 
+Other= c("Floor", "Grav", "OthW", "Wall"))
+
+House$HeatingQC = fct_collapse(House$HeatingQC, Exc = c("Ex", "Gd"), 
+Good= c("Fa", "TA", "Po"))
+
+House$Electrical = fct_collapse(House$Electrical, SBrkr = "Sbrkr", 
+Other= c("FuseA", "FuseF", "FuseP", "Mix"))
+
+House$Functional = fct_collapse(House$Functional, Typ = "Typ", 
+Deduction= c("Maj1", "Maj2", "Min1", "Min2", "Mod", "Sev"))
+
+House$GarageType = fct_collapse(House$GarageType, "1" = "6", "2" ="2", 
+Other= c("1", "3", "4", "5", "NOG"))
+
+House$BsmtFinType1 = fct_collapse(House$BsmtFinType1, "AccQuarters" = 
+c("3", "1", "4"),  Other= c("NOB", "5", "2", "6"))
+
+House$GarageFinish = fct_collapse(House$GarageFinish, "1" = "1", "2" ="2", 
+"3" =c("3", "NOG"))
+
+House$GarageQual = fct_collapse(House$GarageQual, "1" = "5", "2"= c("1", "2",
+"3", "4", "NOG"))
+
+House$GarageCond = fct_collapse(House$GarageCond, "1" = "5", "2"= c("1", "2", 
+"3", "4", "NOG"))
+
+House$PoolQC = fct_collapse(House$PoolQC, "1" = "NOP", "2" = c("1", "2", "3"))
+
+House$Fence = fct_collapse(House$Fence, "1" = "NOP", "2" = c("1", "2", "3", "4"))
+
+House$MiscFeature = fct_collapse(House$MiscFeature, "1" = "NONE", "2"= 
+c("1", "2", "3", "4"))
+
+House$SaleType = fct_collapse(House$SaleType, WD = "WD", New = "New", 
+Other = c("CWD", "VWD", "COD", "Con", "ConLw", "ConLD", "Oth"))
+
+House$SaleCondition = fct_collapse(House$SaleCondition, Normal = "Normal", 
+Abnorml = "Abnorml", Partial ="Partial", Other = c("AdjLand", "Family", "Alloca"))
+
+House$MoSold = cut(House$MoSold, breaks = c(1, 6, 12), labels = 
+c("1stFyear", "2ndFyear"), right = FALSE)
+
+House$YearBuilt = cut(House$YearBuilt, breaks = c(1880, 1900, 1920, 1940, 
+1960, 1980, 2000, 2010), labels = c("1st20s", "2nd20s",  "3nd20s", 
+"4th20s", "5th20s", "6th20s", "7th20s"), right = FALSE)
+
+House$YearRemodAdd = cut(House$YearRemodAdd, breaks = c(1950, 1970, 1990, 
+2010), labels = c( "1st20s", "2nd20s", "3rd20s"), right = FALSE)
+
+House$MSSubClass = fct_collapse(House$MSSubClass, OneStory = 
+c("20", "30", "40"), OneHfStoty = c("45", "50"), TwoStory = 
+c("60", "70"), TwoHfStory = "75",  Split = c("80", "85"), Duplex = "90",
+Pud = c("120", "150"), PudM = c("160", "180"), TwoFam = "190")
+
+
+House$GarageYrBlt = cut(House$GarageYrBlt, breaks = c(1900,  1920,  1940,  
+1960,  1980,  2000, 2010), labels = c("1st20s", "2nd20s",  "3rd20s", 
+"4th20s", "5th20s",  "6ths"), right = FALSE)
+```
+*remove NAs*
+
+```{r, echo=TRUE, eval=FALSE}
+House = na.omit(House)
+sum(is.na(House))
+dim(House)
+```
+*Preliminary Variable Selection*
+
+```{r Preliminary Variable Selection, echo=TRUE, eval=FALSE}
+set.seed(100)
+H2 = Boruta(SalePrice ~ ., data = House, doTrace = 0, maxRuns = 200)
+print(H2)
+H3 = TentativeRoughFix(H2)
+getNonRejectedFormula(H3)
+```
+*Splitting the Data*
+
+```{r Splitting the Data, echo=TRUE, eval=FALSE}
+set.seed(200)
+Train_index = sample(dim(House)[1], dim(House)*0.70)
+Train_set = House[Train_index, ]
+Test_set = House[-Train_index, ]
+```
+*Linear model*
+```{r , echo=TRUE, eval=FALSE}
+set.seed(300)
+lm_fit =  lm(Train_set$SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + LotShape + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    YearBuilt + YearRemodAdd + Exterior1st + Exterior2nd + MasVnrType + 
+    MasVnrArea + ExterQual + Foundation + BsmtQual + BsmtExposure + 
+    BsmtFinType1 + BsmtFinSF1 + BsmtUnfSF + TotalBsmtSF + HeatingQC + 
+    CentralAir + X1stFlrSF + X2ndFlrSF + GrLivArea + BsmtFullBath + 
+    FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + 
+    TotRmsAbvGrd + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + GarageArea + PavedDrive + WoodDeckSF + 
+    OpenPorchSF, data = Train_set)
+```
+*Best model selection & inferences*
+
+```{r, echo=TRUE, eval=FALSE}
+Best_lm = step(lm_fit, trace = 0)
+```
+*Removing rows*
+
+```{r, echo=TRUE, eval=FALSE}
+Train_set3 = Train_set2[-c(722,373), ]
+```
+
+*Robust Regresion*
+
+```{r, echo=TRUE, eval=FALSE}
+set.seed(111)
+par(mfrow = c(1,2))
+rlm_fit = rlm(Train_set$SalePrice ~ Train_set$LotFrontage + Train_set$LotArea 
++ Train_set$Neighborhood + Train_set$BldgType + Train_set$HouseStyle +
+Train_set$OverallQual + Train_set$OverallCond + Train_set$Exterior2nd +Train_set$BsmtQual + Train_set$BsmtExposure +  Train_set$BsmtFinSF1 
++ Train_set$BsmtUnfSF + Train_set$TotalBsmtSF + Train_set$CentralAir +
+Train_set$X1stFlrSF + Train_set$GrLivArea + Train_set$BsmtFullBath + 
+Train_set$FullBath + Train_set$HalfBath + Train_set$KitchenAbvGr +
+Train_set$KitchenQual + Train_set$TotRmsAbvGrd + Train_set$Fireplaces +
+Train_set$FireplaceQu + Train_set$GarageCars + Train_set$SaleCondition + Train_set$BsmtFinType1,
+    data = Train_set)
+plot(Best_lm, 5, main = "Leverage Plot for lm_fit")
+plot(rlm_fit, 5, main = "Leverage Plot for rlm_fit")
+```
+*lm Test Errors*
+
+```{r , echo=T, eval=FALSE}
+set.seed(500)
+p2 = predict(Best_lm, Test_set)
+error.lm = mean((Test_set$SalePrice - p2)^2) 
+```
+
+*New.lm_fit*
+
+```{r, echo=T, eval=FALSE}
+New.lm_fit =  lm(formula = Train_set3$SalePrice ~ MSSubClass + LotFrontage + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    Exterior2nd + Foundation + BsmtExposure + BsmtFinType1 + 
+    BsmtFinSF1 + BsmtUnfSF + HeatingQC + CentralAir + X1stFlrSF + 
+    X2ndFlrSF + BsmtFullBath + FullBath + HalfBath + KitchenAbvGr + 
+    KitchenQual + TotRmsAbvGrd + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + OpenPorchSF, data = Train_set3)
+```
+
+```{r, echo=T, eval=FALSE}
+plot(New.lm_fit, 1)
+```
+
+```{r, echo=T, eval=FALSE}
+bptest(New.lm_fit)
+```
+
+*Random Forest Model*
+
+```{r, ech0=T, eval=FALSE}
+set.seed(400)
+rf_fit  = randomForest(SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + LotShape + 
+    Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + 
+    YearBuilt + YearRemodAdd + Exterior1st + Exterior2nd + MasVnrType + 
+    MasVnrArea + ExterQual + Foundation + BsmtQual + BsmtExposure + 
+    BsmtFinType1 + BsmtFinSF1 + BsmtUnfSF + TotalBsmtSF + HeatingQC + 
+    CentralAir + X1stFlrSF + X2ndFlrSF + GrLivArea + BsmtFullBath + 
+    FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + 
+    TotRmsAbvGrd + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + 
+    GarageFinish + GarageCars + GarageArea + PavedDrive + WoodDeckSF + 
+    OpenPorchSF, importance=TRUE, Train_set)
+rf_fit
+```
+*rf Test Error*
+
+```{r, echo=T, eval=FALSE}
+pp =predict(rf_fit, Test_set)
+error.rf = mean((Test_set$SalePrice - pp)^2) 
+```
+*My tables*
+
+```{r, echo=T, eval=FALSE}
+table = matrix(NA, nrow = 3, ncol = 3)
+rownames(table) = c("rlm", "lm", "rf")
+colnames(table) = c("MSE", "BIAS", "VARIANCE")
+table[3,]= c(error.rlm, rlm.bias, rlm.var)
+
+table[2, ]= c(error.lm, lm.bias, lm.var)
+
+table[1,]= c(error.rf, rf.bias, rf.var)
+kable(table, caption = "Errors Tatble")
+```
+
+```{r, echo=T, eval=FALSE}
+table = matrix(NA, nrow = 10, ncol = 3)
+colnames(table) = c("log(SalePrice)", "PredictedValue", "Difference")
+table[,1]= c(Train_set11$SalePrice[1], Train_set11$SalePrice[2], Train_set11$SalePrice[3], Train_set11$SalePrice[4], Train_set11$SalePrice[5],Train_set11$SalePrice[6], Train_set11$SalePrice[7], Train_set11$SalePrice[10], Train_set11$SalePrice[9], Train_set11$SalePrice[8])
+
+table[, 2]= c(prd[1], prd[2],prd[3], prd[4], prd[5], prd[6], prd[7], prd[8], prd[9], prd[10])
+
+table[,3]= c(
+round(abs(Train_set11$SalePrice[1]-prd[1]),3), round(abs(Train_set11$SalePrice[2]-prd[2]),3), round(abs(Train_set11$SalePrice[3]-prd[3]),3), round(abs(Train_set11$SalePrice[4]-prd[4]),3), round(abs(Train_set11$SalePrice[5]-prd[5]),3), round(abs(Train_set11$SalePrice[6]-prd[6]),3), round(abs(Train_set11$SalePrice[7]-prd[7]),3), round(abs(Train_set11$SalePrice[8]-prd[8]),3), round(abs(Train_set11$SalePrice[9]-prd[9]),3), round(abs(Train_set11$SalePrice[10]-prd[10]),3))
+kable(table, caption = "Comparative Table")
+```
